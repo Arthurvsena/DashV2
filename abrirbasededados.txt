@@ -1,0 +1,2 @@
+psql -h ep-icy-surf-a4sra877-pooler.us-east-1.aws.neon.tech -U default -d verceldb
+5Gk9sMNTaLwi
