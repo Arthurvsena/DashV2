@@ -1,5 +1,6 @@
 # Arquivo: main.py
 from nicegui import ui, app
+from components.loading import mostrar_loading
 from login import login_page
 from pages.Dashboard import show_dashboard
 from pages.Perfil_Usuario import show_profile
@@ -22,15 +23,36 @@ async def login():
 
 @ui.page('/dashboard')
 async def dashboard():
-    aplicar_estilo_global()
-    
     session = app.storage.user
-    if not session.get('username'):
-        ui.navigate.to('/login')
-        return  # ⛔ Impede execução se não estiver logado
-    
-    await show_dashboard()
+    print("🔍 Sessão atual no dashboard:", session)
 
+    if not session.get('username'):
+        print("⛔ Sessão inválida, redirecionando...")
+        ui.navigate.to('/login')
+        return
+    
+    aplicar_estilo_global()
+
+    # Criar container principal
+    main_container = ui.column().classes("w-full")
+
+    # Exibe o loader
+    with main_container:
+        loader = mostrar_loading("🔄 Carregando seu dashboard...")
+
+    # 🧠 Cria um container separado temporário pra montar o dashboard
+    dashboard_container = ui.column().classes("w-full hidden")
+
+    # Monta o dashboard dentro do container invisível
+    with dashboard_container:
+        await show_dashboard()
+
+    # Agora que terminou o carregamento:
+    loader.close()  # ou loader.delete()
+    main_container.clear()  # limpa o loader
+
+    # Mostra o dashboard de verdade
+    dashboard_container.classes(remove='hidden')  # faz ele aparecer
 @ui.page('/perfil')
 async def perfil():
     session = app.storage.user

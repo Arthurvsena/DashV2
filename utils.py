@@ -5,7 +5,7 @@ import psycopg2
 import os
 from io import BytesIO
 from PIL import Image
-from nicegui import ui
+from nicegui import app, ui
 from datetime import date, timedelta
 
 
@@ -58,6 +58,13 @@ def parar_carregamento():
         }
     </script>
     """)
+
+def checar_login():
+    if not app.storage.user.get('username'):
+        ui.notify('Você precisa estar logado para acessar esta página.', color='negative')
+        ui.navigate.to('/')
+        return False
+    return True
 
 def carregar_logo_global():
     from database import get_connection
@@ -137,7 +144,8 @@ def convert_to_datetime(df: pd.DataFrame, col_name: str) -> pd.DataFrame:
     return df
 
 def logout_usuario():
-    app.storage.user.clear()  # limpa sessão
+    app.storage.user.clear()
+    ui.notify('Logout realizado com sucesso ✅', color='positive') 
     ui.navigate.to('/login')  # volta para login
 
 def comparar_periodos(schema, func_query_faturamento):

@@ -94,7 +94,7 @@ def aplicar_estilo_global():
             width: 100vw;
             height: 100vh;
             background: rgba(14, 17, 23, 0.9);
-            backdrop-filter: blur(6px);
+            backdrop-filter: blur(20px);
             display: flex;
             justify-content: center;
             align-items: center;

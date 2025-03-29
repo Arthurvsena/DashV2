@@ -1,7 +1,9 @@
 from nicegui import ui, app
+from auth import gerar_token
 from auth import get_user, verify_password
 from style import aplicar_estilo_global, estilizar_botao_animado
 from components.loading import mostrar_loading
+from logger import log_sucesso, log_falha
 import asyncio
 
 async def login_page():
@@ -25,12 +27,19 @@ async def login_page():
                         'schema': user[2],
                         'is_master': user[3],
                     })
+                    print("📦 Sessão após login:", app.storage.user)
+                    log_sucesso(username.value)
+
+
+                    token = gerar_token(username.value, user[2])
+                    app.storage.user['token'] = token
                     # Mostra tela de loading e navega para dashboard
                     loading = mostrar_loading()
                     await asyncio.sleep(1.5)
                     loading.delete()
                     ui.navigate.to('/dashboard')
                 else:
+                    log_falha(username.value)
                     message.text = '❌ Usuário ou senha incorretos'
             except Exception as e:
                 message.text = f'Erro no login: {e}'

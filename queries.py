@@ -156,3 +156,73 @@ def get_categorias_query(schema):
         ORDER BY quantidade_total DESC
     '''
     return execute_query(schema, query)
+def get_valor_total_frete_query(schema: str, start_date: str, end_date: str):
+    conn = get_connection()
+    cur = conn.cursor()
+    query = f"""
+        SELECT SUM(CAST(nfs.valor_frete AS NUMERIC)) AS valor_total_frete
+        FROM {schema}.tiny_nfs nfs
+        WHERE nfs.tipo = 'S'
+          AND nfs.cliente_cpf_cnpj IN (
+              SELECT cliente_cpf_cnpj
+              FROM {schema}.tiny_orders
+              WHERE cliente_cpf_cnpj IS NOT NULL
+          )
+          AND nfs."createdAt" BETWEEN '{start_date}' AND '{end_date}';
+    """
+    cur.execute(query)
+    result = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    return result or 0
+
+def get_valor_total_devolucao_query(schema: str, start_date: str, end_date: str):
+    conn = get_connection()
+    cur = conn.cursor()
+    query = f"""
+        SELECT SUM(CAST(nfs.valor AS NUMERIC)) AS valor_total_devolucao
+        FROM {schema}.tiny_nfs nfs
+        WHERE nfs.tipo = 'E'
+          AND nfs.cliente_cpf_cnpj IN (
+              SELECT cliente_cpf_cnpj
+              FROM {schema}.tiny_orders
+              WHERE cliente_cpf_cnpj IS NOT NULL
+          )
+          AND nfs."createdAt" BETWEEN '{start_date}' AND '{end_date}';
+    """
+    cur.execute(query)
+    result = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    return result or 0
+
+def get_faturamento_por_marketplace_query(schema: str, start_date: str, end_date: str):
+    query = f"""
+        SELECT
+            o.forma_pagamento AS marketplace,
+            DATE(nfs."createdAt") AS data,
+            SUM(CAST(nfs.valor AS NUMERIC)) AS valor_total
+        FROM {schema}.tiny_nfs nfs
+        JOIN {schema}.tiny_orders o
+          ON o.cliente_cpf_cnpj = nfs.cliente_cpf_cnpj
+        WHERE nfs.tipo = 'S'
+          AND nfs."createdAt" BETWEEN '{start_date}' AND '{end_date}'
+        GROUP BY o.forma_pagamento, DATE(nfs."createdAt")
+        ORDER BY data ASC;
+    """
+    return execute_query(schema, query)
+
+def get_faturamento_mensal_query(schema: str):
+    return f"""
+        SELECT
+            TO_CHAR(nfs."createdAt", 'YYYY-MM') AS mes,
+            COUNT(DISTINCT o.id) AS total_pedidos,
+            SUM(CAST(oi.quantidade AS NUMERIC) * CAST(oi.valor_unitario AS NUMERIC)) AS faturamento
+        FROM {schema}.tiny_nfs nfs
+        JOIN {schema}.tiny_orders o ON o.cliente_cpf_cnpj = nfs.cliente_cpf_cnpj
+        JOIN {schema}.tiny_order_item oi ON oi.order_id = o.id
+        WHERE nfs.tipo = 'S'
+        AND nfs."createdAt" >= (CURRENT_DATE - INTERVAL '12 months')
+        GROUP BY mes
+        ORDER BY mes
+    """
