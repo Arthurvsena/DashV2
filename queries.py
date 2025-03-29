@@ -52,7 +52,7 @@ def get_order_item_query(schema, start_date, end_date):
     """
     return execute_query(schema, query)
 
-def get_valor_total_faturado_query(schema:str, start_date: str, end_date:str):
+def get_valor_total_faturado_query(schema, start_date, end_date):
     conn = get_connection()
     cur = conn.cursor()
     query = f"""

@@ -148,41 +148,90 @@ def logout_usuario():
     ui.notify('Logout realizado com sucesso ✅', color='positive') 
     ui.navigate.to('/login')  # volta para login
 
-def comparar_periodos(schema, func_query_faturamento):
-    """
-    Calcula os faturamentos do mês atual e anterior usando a função de query fornecida.
-    
-    Retorna: faturamento_atual, faturamento_anterior, indicador (🔼 ou 🔽), cor (classe CSS)
-    """
-    hoje = date.today()
 
-    # Mês atual
-    inicio_mes_atual = hoje.replace(day=1)
-    fim_mes_atual = hoje
+from datetime import datetime, timedelta
 
-    # Mês anterior
-    inicio_mes_anterior = (inicio_mes_atual - timedelta(days=1)).replace(day=1)
-    fim_mes_anterior = inicio_mes_atual - timedelta(days=1)
+def comparar_periodos(schema, func, inicio_str, fim_str):
+    from datetime import datetime, timedelta
+    hoje = datetime.today().date()
 
-    # Datas formatadas
-    atual_de = inicio_mes_atual.strftime("%Y-%m-%d")
-    atual_ate = fim_mes_atual.strftime("%Y-%m-%d")
-    anterior_de = inicio_mes_anterior.strftime("%Y-%m-%d")
-    anterior_ate = fim_mes_anterior.strftime("%Y-%m-%d")
+    inicio = datetime.strptime(inicio_str, "%Y-%m-%d").date()
+    fim = datetime.strptime(fim_str, "%Y-%m-%d").date()
+    intervalo = fim - inicio
 
-    # Faturamento usando a função de query fornecida
-    atual = func_query_faturamento(schema, atual_de, atual_ate)
-    anterior = func_query_faturamento(schema, anterior_de, anterior_ate)
+    # Verifica se o período é futuro
+    if inicio > hoje:
+        # Projeção: média dos últimos 6 meses
+        total_meses = 6
+        soma = 0
 
-    # Indicador
+        for i in range(1, total_meses + 1):
+            inicio_mes = (hoje.replace(day=1) - timedelta(days=30 * i)).replace(day=1)
+            fim_mes = (inicio_mes.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
 
-    if anterior is None or anterior == 0:
-        return atual, anterior, "⚠️", "text-yellow-400"
+            inicio_mes_str = inicio_mes.strftime("%Y-%m-%d")
+            fim_mes_str = fim_mes.strftime("%Y-%m-%d")
 
-    if atual > anterior:
-        return atual, anterior, "⬆️", "text-green-500"
-    elif atual < anterior:
-        return atual, anterior, "⬇️", "text-red-500"
+            valor_mes = func(schema, inicio_mes_str, fim_mes_str)
+            soma += valor_mes or 0
+
+        media = soma / total_meses
+
+        qtd_meses_futuros = max(1, intervalo.days // 30)
+        valor_projetado = media * qtd_meses_futuros
+
+        return valor_projetado, media, f"Projeção com base nos últimos {total_meses} meses", "text-yellow-400"
+
     else:
-        return atual, anterior, "➡️", "text-gray-400"
+        # Cálculo normal (comparação com período anterior)
+        inicio_anterior = inicio - intervalo - timedelta(days=1)
+        fim_anterior = inicio - timedelta(days=1)
 
+        inicio_anterior_str = inicio_anterior.strftime("%Y-%m-%d")
+        fim_anterior_str = fim_anterior.strftime("%Y-%m-%d")
+
+        valor_atual = func(schema, inicio_str, fim_str)
+        valor_anterior = func(schema, inicio_anterior_str, fim_anterior_str)
+
+        if not valor_anterior or valor_anterior == 0:
+            indicador = "↑ 100%" if valor_atual > 0 else "0%"
+            cor = "text-blue-500" if valor_atual >= 0 else "text-red-500"
+        else:
+            variacao = ((valor_atual - valor_anterior) / valor_anterior) * 100
+            seta = "↑" if variacao >= 0 else "↓"
+            cor = "text-blue-500" if variacao >= 0 else "text-red-500"
+            indicador = f"{seta} {abs(variacao):.2f}%"
+
+        return valor_atual, valor_anterior, indicador, cor
+    
+def prever_valor_futuro(schema, func, data_inicio, data_fim):
+    hoje = datetime.today().date()
+    intervalo_futuro = (data_fim - data_inicio).days
+    meses_futuros = max(1, intervalo_futuro // 30)
+
+    soma = 0
+    valores = []
+
+    for i in range(1, 7):  # últimos 6 meses
+        inicio_mes = (hoje.replace(day=1) - timedelta(days=30 * i)).replace(day=1)
+        fim_mes = (inicio_mes.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+
+        inicio_mes_str = inicio_mes.strftime("%Y-%m-%d")
+        fim_mes_str = fim_mes.strftime("%Y-%m-%d")
+
+        valor = func(schema, inicio_mes_str, fim_mes_str) or 0
+        valores.append(valor)
+        soma += valor
+
+    media = soma / 6
+    valor_projetado = media * meses_futuros
+
+    # Comparar os últimos dois meses para detectar tendência
+    if len(valores) >= 2:
+        seta = "🔺" if valores[-1] > valores[-2] else "🔻"
+        cor = "text-green-500" if valores[-1] > valores[-2] else "text-red-500"
+    else:
+        seta = "➖"
+        cor = "text-gray-400"
+
+    return valor_projetado, media, seta, cor
