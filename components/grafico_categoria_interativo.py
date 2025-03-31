@@ -8,6 +8,12 @@ from queries import (
 )
 
 def grafico_categoria_interativo(start_date, end_date, schema):
+    # Define período padrão se nenhum filtro for aplicado
+    if not start_date or not end_date:
+        today = pd.to_datetime('today').date()
+        start_date = today.replace(day=1)
+        end_date = today
+
     with ui.card().classes('bg-gray-900 text-white w-full'):
         ui.label('📊 Gráfico Interativo por Categoria').classes('text-lg font-bold mb-4')
 
@@ -20,10 +26,20 @@ def grafico_categoria_interativo(start_date, end_date, schema):
         # Filtra notas de saída
         df_nfs = df_nfs[df_nfs['tipo'].str.upper() == 'S'].copy()
 
+        # Debug antes do merge
+        print("📦 df_items shape:", df_items.shape)
+        print("📦 df_orders shape:", df_orders.shape)
+        print("📦 df_nfs shape:", df_nfs.shape)
+        print("📦 df_products shape:", df_products.shape)
+
         # Junta tudo
         df_merged = df_items.merge(df_orders, left_on='order_id', right_on='id') \
                              .merge(df_nfs, on='cliente_cpf_cnpj') \
                              .merge(df_products, left_on='sku', right_on='codigo')
+
+        # Debug após merge
+        print("✅ df_merged criado com shape:", df_merged.shape)
+        print("🔎 Categorias únicas:", df_merged['categoria'].unique())
 
         df_merged['quantidade'] = pd.to_numeric(df_merged['quantidade'], errors='coerce')
         df_merged['valor_unitario'] = pd.to_numeric(df_merged['valor_unitario'], errors='coerce')
@@ -31,9 +47,20 @@ def grafico_categoria_interativo(start_date, end_date, schema):
         df_merged['faturamento'] = df_merged['faturamento'].fillna(0)
 
         df_merged['categoria'] = df_merged['categoria'].astype(str).str.strip()
-        df_merged[['categoria_base', 'subcategoria']] = df_merged['categoria'].str.split('>>', expand=True)
-        df_merged['categoria_base'] = df_merged['categoria_base'].str.strip().fillna('Sem categoria')
-        df_merged['subcategoria'] = df_merged['subcategoria'].str.strip().fillna('Sem subcategoria')
+        split_categorias = df_merged['categoria'].str.split('>>', expand=True)
+
+        if split_categorias.shape[1] >= 1:
+            df_merged['categoria_base'] = split_categorias[0].str.strip()
+        else:
+            df_merged['categoria_base'] = 'Sem categoria'
+
+        if split_categorias.shape[1] >= 2:
+            df_merged['subcategoria'] = split_categorias[1].str.strip()
+        else:
+            df_merged['subcategoria'] = 'Sem subcategoria'
+
+        df_merged['categoria_base'] = df_merged['categoria_base'].fillna('Sem categoria')
+        df_merged['subcategoria'] = df_merged['subcategoria'].fillna('Sem subcategoria')
 
         df_categoria = df_merged.groupby("categoria_base")["faturamento"].sum().reset_index()
         df_subcategoria = df_merged.groupby(["categoria_base", "subcategoria"])["faturamento"].sum().reset_index()
@@ -59,7 +86,6 @@ def grafico_categoria_interativo(start_date, end_date, schema):
 
         # Layout lado a lado
         with ui.row().classes("w-full justify-between items-start gap-4").style("display: flex"):
-            # Gráfico de categorias
             categoria_inicial = df_categoria.iloc[0]['categoria_base'] if not df_categoria.empty else 'Sem categoria'
             dados_iniciais = df_subcategoria[df_subcategoria['categoria_base'] == categoria_inicial]
 
@@ -71,7 +97,6 @@ def grafico_categoria_interativo(start_date, end_date, schema):
                 options=atualizar_grafico(dados_iniciais, f'Subcategorias de {categoria_inicial}', 'subcategoria')
             ).classes("w-full").style("height: 300px")
 
-        # Evento de clique
         def on_click_categoria(e):
             categoria_selecionada = e.args.get('name') or (e.args.get('data') or {}).get('name')
             if not categoria_selecionada:
