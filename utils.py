@@ -7,6 +7,7 @@ from io import BytesIO
 from PIL import Image
 from nicegui import app, ui
 from datetime import date, timedelta
+from database import get_connection
 
 
 
@@ -179,3 +180,9 @@ def comparar_periodos(schema, func, inicio_str, fim_str):
         indicador = f"{seta} {abs(variacao):.2f}%"
 
     return valor_atual, valor_anterior, indicador, cor
+
+def executar_query_lista(query):
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query)
+            return cur.fetchall()

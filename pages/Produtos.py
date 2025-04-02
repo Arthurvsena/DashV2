@@ -1,41 +1,111 @@
 from nicegui import ui, app
-import pandas as pd
-import datetime
-from utils import load_data
-from queries import get_products_query, get_order_item_query
+from style import aplicar_estilo_global
+from utils import get_connection
+import queries
+from datetime import date
+from datetime import datetime
 
+@ui.page('/produtos')
 async def show_produtos():
+    aplicar_estilo_global()
+    app.storage.user['rota_atual'] = '/produtos'
+
+    # Conexão e execução da query
     session = app.storage.user
-    if not session.get("username"):
-        ui.notify("Você precisa estar logado.")
-        ui.open("/login")
-        return
-
     schema = session.get("schema")
-    ui.label("🛒 Produtos cadastrados").classes("text-2xl")
 
-    hoje = datetime.date.today()
-    data_inicio = ui.date(value=hoje.replace(day=1), label="Data Início").classes("w-1/3")
-    data_fim = ui.date(value=hoje, label="Data Fim").classes("w-1/3")
 
-    tabela_area = ui.column().classes("w-full")
 
-    def atualizar():
-        start_str = data_inicio.value.strftime("%Y-%m-%d")
-        end_str = data_fim.value.strftime("%Y-%m-%d")
+# Corrigido para garantir string 'YYYY-MM-DD'
+    data_inicio = session.get("filtro_data_inicio")
+    data_fim = session.get("filtro_data_fim")
 
-        produtos_df = load_data(get_products_query(schema))
-        pedidos_df = load_data(get_order_item_query(schema, start_str, end_str))
+    if isinstance(data_inicio, (datetime, date)):
+        data_inicio = data_inicio.strftime('%Y-%m-%d')
+    if isinstance(data_fim, (datetime, date)):
+        data_fim = data_fim.strftime('%Y-%m-%d')
 
-        resumo = pedidos_df.groupby("produto_id").agg({"quantidade": "sum", "preco": "mean"}).reset_index()
-        df_final = pd.merge(produtos_df, resumo, on="produto_id", how="left")
-        df_final.fillna({"quantidade": 0, "preco": 0}, inplace=True)
+    # fallback padrão
+    if not data_inicio:
+        data_inicio = "2024-01-01"
+    if not data_fim:
+        data_fim = date.today().strftime('%Y-%m-%d')
 
-        tabela_area.clear()
-        with tabela_area:
-            ui.table(columns=[{'name': c, 'label': c, 'field': c} for c in df_final.columns],
-                     rows=df_final.to_dict("records"),
-                     row_key='produto_id').classes("w-full")
+    resultado = queries.get_produto_campeao(schema, data_inicio, data_fim)
+    produto_campeao = resultado[0] if resultado else '-'
+    faturamento_produto = resultado[1] if resultado else 0.0
 
-    ui.button("🔄 Atualizar", on_click=atualizar).classes("mt-4")
-    atualizar()
+    with ui.column().classes('w-full p-4 gap-10'):
+        # LINHA 1 - CARDS DE INDICADORES
+        with ui.row().classes('w-full gap-2'):
+            titulos = [
+                ('🏆 Produto Campeão de Vendas', produto_campeao, faturamento_produto),
+                ('💰 Produto Mais Rentável', '-', 0.0),
+                ('📦 Total Produtos Vendidos', '-', 0.0),
+                ('📥 Produto com Mais Devoluções', '-', 0.0),
+                ('🛑 Total de Produtos Sem Vendas', '-', 0.0),
+            ]
+            for titulo, descricao, valor in titulos:
+                with ui.card().classes('bg-[#1e1e1e] text-white p-4 rounded-xl').classes('flex-1'):
+                    ui.label(titulo).classes('text-sm text-gray-400')
+                    ui.label(descricao).classes('text-2xl font-bold')
+                    ui.label(f"R$ {valor:,.2f}").classes("text-sm")
+
+        # LINHA 2 - GRÁFICOS
+        with ui.row().classes('w-full gap-2'):
+            with ui.card().classes('bg-[#1e1e1e] text-white p-4 rounded-xl').style('width: 29%; height: 320px'):
+                ui.label('🌡️ Mapa de Calor de Faturamento').classes('text-sm text-gray-400')
+                ui.label('Gráfico aqui')
+
+            with ui.card().classes('bg-[#1e1e1e] text-white p-4 rounded-xl').style('width: 69%; height: 320px'):
+                ui.label('📊 Curva ABC (Pareto)').classes('text-sm text-gray-400')
+                ui.label('Gráfico aqui')
+
+        # FILTROS + TÍTULO
+        with ui.row().classes('w-full items-center justify-between'):
+            ui.label("🧾 Produtos Vendidos no Período").classes("text-lg font-semibold text-white")
+            with ui.row().classes("gap-2"):
+                ui.select(
+                    options=['Todos', 'Vendidos', 'Sem Venda'], 
+                    label='Status'
+                ).props('dense popup-content-class=q-dark').classes('w-[100px] bg-[#1e1e1e] text-white rounded-xl')
+                ui.select(
+                    options=['Todas'], 
+                    label='Categoria'
+                ).props('dense popup-content-class=q-dark').classes('w-[100px] bg-[#1e1e1e] text-white rounded-xl')
+                ui.select(
+                    options=['Todas'], 
+                    label='Subcategoria'
+                ).props('dense popup-content-class=q-dark').classes('w-[100px] bg-[#1e1e1e] text-white rounded-xl')
+                ui.button('FILTRAR').classes('px-4 py-2 rounded text-white bg-[#08c5a199] hover:bg-[#08c5a1] transition')
+
+        # INDICADORES ABAIXO DOS FILTROS
+        with ui.row().classes('w-full gap-4'):
+            for titulo in ['🏦 Capital Investido', '📈 Potencial de Retorno']:
+                with ui.card().classes('bg-[#1e1e1e] text-white p-4 rounded-xl flex-1'):
+                    ui.label(titulo).classes('text-sm text-gray-400')
+                    ui.label("-").classes('text-2xl font-bold')
+
+        # TABELA
+        ui.table(
+            columns=[
+                {'name': 'sku', 'label': 'SKU', 'field': 'sku'},
+                {'name': 'titulo', 'label': 'Título', 'field': 'titulo'},
+                {'name': 'cobertura', 'label': 'Cobertura de Estoque', 'field': 'cobertura'},
+                {'name': 'cmv', 'label': 'C.M.V', 'field': 'cmv'},
+                {'name': 'lucro', 'label': '% Lucro Atual', 'field': 'lucro'},
+                {'name': 'estoque', 'label': 'Estoque', 'field': 'estoque'},
+                {'name': 'preco', 'label': 'Preço Venda', 'field': 'preco'},
+                {'name': 'sugestao', 'label': 'Sugestão', 'field': 'sugestao'},
+                {'name': 'ultima', 'label': 'Última Venda', 'field': 'ultima'},
+            ],
+            rows=[],
+        ).classes('w-full text-white bg-[#1e1e1e] rounded-xl mt-2')
+
+        print(data_inicio)
+        print(data_fim)
+        print(produto_campeao)
+        print(resultado)
+        print(faturamento_produto)
+        print(titulo)
+        print(descricao)

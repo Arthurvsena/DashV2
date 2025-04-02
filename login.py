@@ -19,6 +19,7 @@ async def login_page():
         message = ui.label().classes('text-red-500 mt-2')
 
         async def tentar_login():
+            app.storage.user.clear()
             try:
                 user = get_user(username.value)
                 if user and verify_password(password.value, user[1]):
@@ -37,7 +38,10 @@ async def login_page():
                     loading = mostrar_loading()
                     await asyncio.sleep(1.5)
                     loading.delete()
-                    ui.navigate.to('/dashboard')
+                    if user[3]:
+                        ui.navigate.to('/painel-master')
+                    else:
+                        ui.navigate.to('/dashboard')
                 else:
                     log_falha(username.value)
                     message.text = '❌ Usuário ou senha incorretos'

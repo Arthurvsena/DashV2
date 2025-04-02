@@ -29,3 +29,17 @@ def get_connection():
         host=host,
         port=port
     )
+
+def executar_comando(query, params=None):
+    """Executa um comando SQL (INSERT, UPDATE, DELETE) com commit automático."""
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(query, params)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cur.close()
+        conn.close()

@@ -28,7 +28,8 @@ def criar_filtro_periodo(ao_filtrar):
                 })
 
                 dialog.close()
-                ui.navigate.to('/dashboard')
+                ui.navigate.to(app.storage.user.get('rota_atual', '/dashboard'))
+
 
             except Exception as e:
                 ui.notify(f"Erro ao aplicar filtro: {e}", type='negative')

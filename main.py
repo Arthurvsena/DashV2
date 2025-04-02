@@ -3,14 +3,34 @@ from components.loading import mostrar_loading
 from components.menu_lateral import criar_menu_lateral
 from components.filtro_periodo import criar_filtro_periodo
 from components.filtro_periodo import abrir_modal_filtro
+from components.topbar import criar_topbar
 from login import login_page
 from pages.Dashboard import show_dashboard
 from pages.Perfil_Usuario import show_profile
 from pages.Produtos import show_produtos
-from pages.Produtos_Sem_Vendas import show_produtos_sem_vendas
-from pages.Painel_Master import show_painel_master
+from pages.Painel_Master import painel_master
 from style import aplicar_estilo_global
 from utils import logout_usuario
+
+
+ui.add_head_html('''
+<style>
+  .q-menu {
+    background-color: #1E1E1E !important;
+    color: white !important;
+  }
+
+  .q-menu .q-item {
+    color: white !important;
+  }
+
+  .q-menu .q-item--active {
+    background-color: #333333 !important;
+  }
+</style>
+''')
+
+
 
 @ui.page('/')
 async def index():
@@ -19,6 +39,7 @@ async def index():
 @ui.page('/login')
 async def login():
     aplicar_estilo_global()
+    app.storage.user['rota_atual'] = '/login'
     await login_page()
 
 @ui.page('/dashboard')
@@ -32,7 +53,7 @@ async def dashboard():
     toggle_menu = criar_menu_lateral()
 
     filtro_dialog = criar_filtro_periodo(lambda inicio, fim: print(f"📅 Filtro aplicado de {inicio} até {fim}"))
-
+    app.storage.user['rota_atual'] = '/dashboard'
     # Cabeçalho principal com menu e logout
     with ui.row().classes("w-full items-center justify-between px-4 py-2").style("border-bottom: 1px solid #333;"):
         ui.icon("menu").on("click", toggle_menu).classes("text-white cursor-pointer")
@@ -53,6 +74,11 @@ async def dashboard():
 
 @ui.page('/perfil')
 async def perfil():
+    aplicar_estilo_global()
+    toggle_menu = criar_menu_lateral()
+    app.storage.user['rota_atual'] = '/perfil'
+    criar_topbar(toggle_menu=toggle_menu, com_filtro=False)
+
     session = app.storage.user
     if not session.get('username'):
         ui.navigate.to('/login')
@@ -61,29 +87,16 @@ async def perfil():
 
 @ui.page('/produtos')
 async def produtos():
+    aplicar_estilo_global()
+    toggle_menu = criar_menu_lateral()
+    app.storage.user['abrir_modal_filtro'] = abrir_modal_filtro
+    app.storage.user['rota_atual'] = '/produtos'
+    criar_topbar(toggle_menu=toggle_menu)
+
     session = app.storage.user
     if not session.get('username'):
         ui.navigate.to('/login')
     else:
         await show_produtos()
-
-@ui.page('/produtos-sem-vendas')
-async def produtos_sem_vendas():
-    session = app.storage.user
-    if not session.get('username'):
-        ui.navigate.to('/login')
-    else:
-        await show_produtos_sem_vendas()
-
-@ui.page('/painel-master')
-async def painel_master():
-    session = app.storage.user
-    if not session.get('username'):
-        ui.navigate.to('/login')
-    elif not session.get('is_master'):
-        ui.notify('Acesso restrito ao Master')
-        ui.navigate.to('/dashboard')
-    else:
-        await show_painel_master()
 
 ui.run(storage_secret='helpseller2025')

@@ -226,3 +226,34 @@ def get_faturamento_mensal_query(schema: str):
         GROUP BY mes
         ORDER BY mes
     """
+
+def get_produto_campeao(schema, data_inicio, data_fim):
+    from utils import get_connection
+    conn = get_connection()
+    cur = conn.cursor()
+
+    query = f'''
+        WITH notas_saida AS (
+            SELECT cliente_cpf_cnpj FROM {schema}.tiny_nfs
+            WHERE tipo = 'S' AND data_emissao BETWEEN '{data_inicio}' AND '{data_fim}'
+        ),
+        pedidos_filtrados AS (
+            SELECT id FROM {schema}.tiny_orders
+            WHERE cliente_cpf_cnpj IN (SELECT cliente_cpf_cnpj FROM notas_saida)
+        ),
+        itens_venda AS (
+            SELECT descricao, valor_unitario FROM {schema}.tiny_order_item
+            WHERE order_id IN (SELECT id FROM pedidos_filtrados)
+        )
+        SELECT descricao, SUM(valor_unitario::numeric) AS total
+        FROM itens_venda
+        GROUP BY descricao
+        ORDER BY total DESC
+        LIMIT 1;
+
+    '''
+    cur.execute(query)
+    result = cur.fetchone()
+    cur.close()
+    conn.close()
+    return result
