@@ -231,29 +231,191 @@ def get_produto_campeao(schema, data_inicio, data_fim):
     from utils import get_connection
     conn = get_connection()
     cur = conn.cursor()
+    print("Executando busca do produto campeão")
+    print("Schema:", schema)
+    print("Data início:", data_inicio)
+    print("Data fim:", data_fim)
+
 
     query = f'''
         WITH notas_saida AS (
+    SELECT REGEXP_REPLACE(cliente_cpf_cnpj, '[^0-9]', '', 'g') AS cpf_cnpj
+    FROM {schema}.tiny_nfs
+        WHERE tipo = 'S' AND "createdAt" BETWEEN '{data_inicio}' AND '{data_fim}'
+    ),
+    pedidos_filtrados AS (
+        SELECT id FROM {schema}.tiny_orders
+        WHERE REGEXP_REPLACE(cliente_cpf_cnpj, '[^0-9]', '', 'g') IN (SELECT cpf_cnpj FROM notas_saida)
+    ),
+    itens_venda AS (
+        SELECT descricao, valor_unitario FROM {schema}.tiny_order_item
+        WHERE order_id IN (SELECT id FROM pedidos_filtrados)
+    )
+    SELECT descricao, SUM(valor_unitario::numeric) AS total
+    FROM itens_venda
+    GROUP BY descricao
+    ORDER BY total DESC
+    LIMIT 1;
+
+    '''
+    print("DEBUG QUERY:", query)
+    cur.execute(query)
+    result = cur.fetchone()
+    cur.close()
+    conn.close()
+    return result
+
+def get_total_produtos_vendidos(schema, data_inicio, data_fim):
+    from utils import get_connection
+    conn = get_connection()
+    cur = conn.cursor()
+
+    query = f"""
+        WITH notas_saida AS (
             SELECT cliente_cpf_cnpj FROM {schema}.tiny_nfs
-            WHERE tipo = 'S' AND data_emissao BETWEEN '{data_inicio}' AND '{data_fim}'
+            WHERE tipo = 'S' AND "createdAt" BETWEEN '{data_inicio}' AND '{data_fim}'
         ),
         pedidos_filtrados AS (
             SELECT id FROM {schema}.tiny_orders
             WHERE cliente_cpf_cnpj IN (SELECT cliente_cpf_cnpj FROM notas_saida)
         ),
         itens_venda AS (
-            SELECT descricao, valor_unitario FROM {schema}.tiny_order_item
+            SELECT quantidade FROM {schema}.tiny_order_item
             WHERE order_id IN (SELECT id FROM pedidos_filtrados)
         )
-        SELECT descricao, SUM(valor_unitario::numeric) AS total
-        FROM itens_venda
-        GROUP BY descricao
-        ORDER BY total DESC
-        LIMIT 1;
-
-    '''
+        SELECT SUM(quantidade::numeric) FROM itens_venda;
+    """
     cur.execute(query)
     result = cur.fetchone()
     cur.close()
     conn.close()
-    return result
+    return int(result[0]) if result and result[0] else 0
+
+def get_produto_mais_devolvido(schema, data_inicio, data_fim):
+    from utils import get_connection
+    conn = get_connection()
+    cur = conn.cursor()
+
+    print("🔍 Executando busca do produto mais devolvido")
+    print(f"Schema: {schema}")
+    print(f"Data início: {data_inicio}")
+    print(f"Data fim: {data_fim}")
+
+    query = f"""
+        WITH notas_saida AS (
+            SELECT cliente_cpf_cnpj
+            FROM {schema}.tiny_nfs
+            WHERE tipo = 'S'
+            AND "createdAt" BETWEEN '{data_inicio}' AND '{data_fim}'
+        ),
+        notas_entrada AS (
+            SELECT cliente_cpf_cnpj
+            FROM {schema}.tiny_nfs
+            WHERE tipo = 'E'
+            AND "createdAt" BETWEEN '{data_inicio}' AND '{data_fim}'
+        ),
+        pedidos_com_devolucao AS (
+            SELECT id, cliente_cpf_cnpj
+            FROM {schema}.tiny_orders
+            WHERE cliente_cpf_cnpj IN (SELECT cliente_cpf_cnpj FROM notas_saida)
+              AND cliente_cpf_cnpj IN (SELECT cliente_cpf_cnpj FROM notas_entrada)
+        ),
+        itens_devolvidos AS (
+            SELECT codigo, descricao
+            FROM {schema}.tiny_order_item
+            WHERE order_id IN (SELECT id FROM pedidos_com_devolucao)
+        )
+        SELECT descricao, COUNT(*) AS total_devolucoes
+        FROM itens_devolvidos
+        GROUP BY descricao
+        ORDER BY total_devolucoes DESC
+        LIMIT 1;
+    """
+
+    try:
+        cur.execute(query)
+        result = cur.fetchone()
+    except Exception as e:
+        print(f"Erro na consulta de devoluções: {e}")
+        result = None
+    finally:
+        cur.close()
+        conn.close()
+
+    # 🔐 Retorno seguro, sempre uma tupla
+    if isinstance(result, tuple) and len(result) == 2:
+        return result
+    return ('-', 0)
+
+def get_top_devolved_products_query(schema):
+    query = f"""
+    WITH devolucoes AS (
+        SELECT oi.descricao, COUNT(*) AS num_devolucoes
+        FROM {schema}.tiny_nfs nf
+        INNER JOIN {schema}.tiny_orders o ON nf.cliente_cpf_cnpj = o.cliente_cpf_cnpj
+        INNER JOIN {schema}.tiny_order_item oi ON o.id = oi.order_id
+        WHERE nf.tipo = 'E'
+        GROUP BY oi.descricao
+    )
+    SELECT descricao, num_devolucoes
+    FROM devolucoes
+    ORDER BY num_devolucoes DESC
+    LIMIT 3;
+    """
+    return execute_query(schema, query)
+
+def get_total_produtos_sem_venda(schema, data_inicio, data_fim):
+    conn = get_connection()
+    cur = conn.cursor()
+    query = f"""
+        WITH notas_saida AS (
+            SELECT REGEXP_REPLACE(cliente_cpf_cnpj, '[^0-9]', '', 'g') AS cpf_cnpj
+            FROM {schema}.tiny_nfs
+            WHERE tipo = 'S' AND "createdAt" BETWEEN '{data_inicio}' AND '{data_fim}'
+        ),
+        pedidos_filtrados AS (
+            SELECT id
+            FROM {schema}.tiny_orders
+            WHERE REGEXP_REPLACE(cliente_cpf_cnpj, '[^0-9]', '', 'g') IN (SELECT cpf_cnpj FROM notas_saida)
+        ),
+        produtos_vendidos AS (
+            SELECT DISTINCT codigo
+            FROM {schema}.tiny_order_item
+            WHERE order_id IN (SELECT id FROM pedidos_filtrados)
+        )
+        SELECT COUNT(*) AS total_sem_venda
+        FROM {schema}.tiny_products
+        WHERE codigo IS NOT NULL
+        AND codigo NOT IN (SELECT codigo FROM produtos_vendidos);
+    """
+    cur.execute(query)
+    result = cur.fetchone()
+    cur.close()
+    conn.close()
+    return result[0] if result else 0
+
+def get_faturamento_por_estado(schema, data_inicio, data_fim):
+    conn = get_connection()
+    cur = conn.cursor()
+    query = f"""
+        WITH notas_saida AS (
+            SELECT REGEXP_REPLACE(cliente_cpf_cnpj, '[^0-9]', '', 'g') AS cpf_cnpj
+            FROM {schema}.tiny_nfs
+            WHERE tipo = 'S' AND "createdAt" BETWEEN '{data_inicio}' AND '{data_fim}'
+        ),
+        pedidos_filtrados AS (
+            SELECT cliente_uf, total_pedido
+            FROM {schema}.tiny_orders
+            WHERE REGEXP_REPLACE(cliente_cpf_cnpj, '[^0-9]', '', 'g') IN (SELECT cpf_cnpj FROM notas_saida)
+        )
+        SELECT cliente_uf AS estado, SUM(total_pedido::numeric) AS total_faturado
+        FROM pedidos_filtrados
+        WHERE cliente_uf IS NOT NULL
+        GROUP BY cliente_uf
+        ORDER BY total_faturado DESC;
+    """
+    cur.execute(query)
+    resultados = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [{"estado": r[0], "valor": float(r[1])} for r in resultados]
