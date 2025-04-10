@@ -8,6 +8,7 @@ SECRET_KEY = "coloque_uma_chave_muito_secreta_aqui"
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+print(hash_password("help2025"))
 
 def verify_password(password: str, hashed) -> bool:
     if not password or not hashed:
@@ -30,7 +31,7 @@ def get_user(username: str):
     try:
         cursor.execute(
             """
-            SELECT usuario, senha_hash, schema_autorizado, is_master
+            SELECT usuario, senha_hash, is_master, schemas_autorizados
             FROM public.usuarios
             WHERE usuario = %s;
             """,
@@ -57,3 +58,4 @@ def validar_token(token: str):
         return None
     except jwt.InvalidTokenError:
         return None
+    

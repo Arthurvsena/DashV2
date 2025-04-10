@@ -5,7 +5,7 @@ from components.grafico_linha_marketplace import plot_linha_marketplace
 from components.grafico_categoria_interativo import grafico_categoria_interativo
 from components.grafico_faturamento_mensal import plot_faturamento_mensal
 from components.menu_lateral import criar_menu_lateral
-from utils import load_data, logout_usuario, comparar_periodos
+from utils import load_data, logout_usuario, comparar_periodos, verificar_sessao_valida
 from style import aplicar_estilo_global
 from queries import (
     get_valor_total_frete_query,
@@ -21,17 +21,14 @@ aplicar_estilo_global()
 
 async def show_dashboard():
 
-    session = app.storage.user
-    if not session.get("username"):
-        ui.notify("Sessão expirada. Faça login novamente.")
-        ui.navigate.to("/login")
+    if not verificar_sessao_valida():
         return
 
+    session = app.storage.user
+    username = session.get("usuario")
     schema = session.get("schema")
-    if not schema:
-        ui.notify("Schema inválido. Faça login novamente.")
-        ui.navigate.to("/login")
-        return
+    schemas_autorizados = session.get("schemas_autorizados", [])
+    is_master = session.get("is_master", False)
 
     hoje = datetime.date.today()
     primeiro_dia = hoje.replace(day=1)

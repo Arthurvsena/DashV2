@@ -8,8 +8,52 @@ from PIL import Image
 from nicegui import app, ui
 from datetime import date, timedelta
 from database import get_connection
+import random
+import string
+import smtplib
+from email.mime.text import MIMEText
+from dotenv import load_dotenv
+
+def gerar_senha_provisoria(tamanho=8):
+    caracteres = string.ascii_letters + string.digits
+    return ''.join(random.choices(caracteres, k=tamanho))
+
+def get_schemas_do_usuario_logado(session):
+    username = session.get("username", "")
+    schemas_autorizados = session.get("schemas_autorizados", [])
+
+    if username == "helpseller":
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT schema_name
+                    FROM information_schema.schemata
+                    WHERE schema_name LIKE '%_tiny'
+                    ORDER BY schema_name;
+                """)
+                return [row[0].replace('_tiny', '') for row in cur.fetchall()]
+
+    # Aplica filtro também para schemas normais
+    return [s.replace('_tiny', '') for s in schemas_autorizados if s.endswith('_tiny')]
 
 
+def enviar_email(destinatario: str, senha: str):
+    msg = MIMEText(
+        f"Sua nova senha provisória é: {senha}\n\n"
+        f"Acesse o sistema e altere assim que possível."
+    )
+    msg['Subject'] = 'Recuperação de Senha - HelpSeller'
+    msg['From'] = os.getenv("EMAIL_REMETENTE")
+    msg['To'] = destinatario
+
+    try:
+        with smtplib.SMTP('smtp.zoho.com', 587) as server:
+            server.starttls()
+            server.login(os.getenv("EMAIL_REMETENTE"), os.getenv("EMAIL_SENHA"))
+            server.send_message(msg)
+        print("📨 E-mail enviado com sucesso")
+    except Exception as e:
+        print(f"❌ Erro ao enviar e-mail: {e}")
 
 def exibir_loader(msg="🔄 Carregando dados..."):
     html = f"""
@@ -186,3 +230,32 @@ def executar_query_lista(query):
         with conn.cursor() as cur:
             cur.execute(query)
             return cur.fetchall()
+        
+        
+
+def listar_todos_schemas():
+    """Retorna todos os schemas do banco que terminam com _tiny"""
+    query = """
+        SELECT schema_name
+        FROM information_schema.schemata
+        WHERE schema_name LIKE '%_tiny'
+        ORDER BY schema_name;
+    """
+    return [row[0] for row in executar_query_lista(query)]
+
+def verificar_sessao_valida():
+    session = app.storage.user
+    username = session.get("username")
+    schema = session.get("schema")
+
+    if not username:
+        ui.notify("Sessão expirada. Faça login novamente.", color='negative')
+        ui.navigate.to("/login")
+        return False
+
+    if not schema:
+        ui.notify("Schema inválido. Faça login novamente.", color='negative')
+        ui.navigate.to("/login")
+        return False
+
+    return True

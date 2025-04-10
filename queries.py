@@ -1,6 +1,9 @@
 # Arquivo: queries.py
 import pandas as pd
+import queries
 from utils import get_connection
+from database import executar_query_lista
+from database import executar_query_df
 
 def execute_query(schema, query):
     conn = get_connection()
@@ -419,3 +422,176 @@ def get_faturamento_por_estado(schema, data_inicio, data_fim):
     cur.close()
     conn.close()
     return [{"estado": r[0], "valor": float(r[1])} for r in resultados]
+
+def get_curva_abc(schema: str, data_inicio: str, data_fim: str):
+    from database import executar_query_df
+
+    query = f'''
+        SELECT 
+            oi.codigo AS sku,
+            p.nome AS descricao,
+            p."tipoVariacao",
+            p.marca,
+            SUM(CAST(oi.quantidade AS NUMERIC)) AS quantidade_total,
+            SUM(CAST(oi.valor_unitario AS NUMERIC) * CAST(oi.quantidade AS NUMERIC)) AS faturamento
+        FROM {schema}.tiny_order_item oi
+        JOIN {schema}.tiny_orders o ON oi.order_id = o.id
+        JOIN {schema}.tiny_nfs nfs ON o.cliente_cpf_cnpj = nfs.cliente_cpf_cnpj
+        JOIN {schema}.tiny_products p ON oi.codigo = p.codigo
+        WHERE nfs.tipo = 'S' 
+          AND nfs.numero_ecommerce IS NOT NULL
+          AND nfs."createdAt" BETWEEN '{data_inicio}' AND '{data_fim}'
+        GROUP BY oi.codigo, p.nome, p.marca, p."tipoVariacao"
+        ORDER BY faturamento DESC
+    '''
+    return executar_query_df(query)
+
+def get_curva_abc_por_pai(schema: str, data_inicio: str, data_fim: str):
+    query = f"""
+        SELECT 
+            SPLIT_PART(i.codigo, '-', 1) AS codigo_base
+            p.nome,
+            p.marca,
+            SUM(CAST(i.quantidade AS NUMERIC) * CAST(i.valor_unitario AS NUMERIC)) AS faturamento
+        FROM {schema}.tiny_order_item i
+        JOIN {schema}.tiny_orders o ON o.id = i.order_id
+        JOIN {schema}.tiny_products p ON p.codigo = i.codigo
+        WHERE o."createdAt" BETWEEN %s AND %s
+        AND p."tipoVariacao" = 'P'
+        GROUP BY codigo_base, p.nome, p.marca
+        ORDER BY faturamento DESC;
+    """
+    dados = executar_query_lista(query, (data_inicio, data_fim))
+    if not dados:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(dados, columns=['produto', 'nome', 'marca', 'faturamento'])
+    return df
+
+def get_curva_abc_por_pai(schema: str, data_inicio: str, data_fim: str, marca: str = None):
+    filtro_marca = "AND p.marca = %s" if marca and marca != 'Todas' else ""
+    params = (data_inicio, data_fim) if not filtro_marca else (data_inicio, data_fim, marca)
+
+    query = f"""
+        SELECT 
+            LEFT(i.codigo, POSITION('-' IN i.codigo) - 1) AS codigo_base,
+            SUM(CAST(i.quantidade AS NUMERIC) * CAST(i.valor_unitario AS NUMERIC)) AS faturamento
+        FROM {schema}.tiny_order_item i
+        JOIN {schema}.tiny_orders o ON o.id = i.order_id
+        JOIN {schema}.tiny_products p ON p.codigo = i.codigo
+        WHERE o."createdAt" BETWEEN %s AND %s
+        {filtro_marca}
+        AND p."tipoVariacao" = 'P'
+        GROUP BY codigo_base
+        ORDER BY faturamento DESC;
+    """
+    dados = executar_query_lista(query, params)
+    if not dados:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(dados, columns=['produto', 'faturamento'])
+    return df
+
+def get_curva_abc_por_marca(schema: str, data_inicio: str, data_fim: str, marca: str = None):
+    filtro_marca = "AND p.marca = %s" if marca and marca != 'Todas' else ""
+    params = (data_inicio, data_fim) if not filtro_marca else (data_inicio, data_fim, marca)
+
+    query = f"""
+        SELECT 
+            p.marca,
+            SUM(CAST(i.quantidade AS NUMERIC) * CAST(i.valor_unitario AS NUMERIC)) AS faturamento
+        FROM {schema}.tiny_order_item i
+        JOIN {schema}.tiny_orders o ON o.id = i.order_id
+        JOIN {schema}.tiny_products p ON p.codigo = i.codigo
+        WHERE o."createdAt" BETWEEN %s AND %s
+        {filtro_marca}
+        AND p."tipoVariacao" = 'P'
+        GROUP BY p.marca
+        ORDER BY faturamento DESC;
+    """
+    dados = executar_query_lista(query, params)
+    if not dados:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(dados, columns=['marca', 'faturamento'])
+    df['produto'] = df['marca']
+    return df[['produto', 'marca', 'faturamento']]
+
+def get_marcas_disponiveis(schema: str):
+    query = f"""
+        SELECT DISTINCT marca
+        FROM {schema}.tiny_products
+        WHERE "tipoVariacao" = 'P'
+        ORDER BY marca;
+    """
+    dados = executar_query_lista(query)
+    return [linha[0] for linha in dados if linha[0]]
+
+def get_produtos(schema: str) -> pd.DataFrame:
+    query = f"""
+        SELECT codigo, nome, marca, "tipoVariacao"
+        FROM {schema}.tiny_products
+        WHERE "tipoVariacao" IS NOT NULL
+    """
+    return executar_query_df(query)
+
+def get_produtos_por_status(schema, start_date, end_date, status='Todos'):
+    if status == 'Todos':
+        query = f"""
+            SELECT codigo, nome, estoque, preco, categoria, preco_custo_medio
+            FROM {schema}.tiny_products
+        """
+    elif status == 'Vendidos':
+        query = f"""
+            SELECT DISTINCT p.codigo, p.nome, p.estoque, p.preco, p.categoria, p.preco_custo_medio
+            FROM {schema}.tiny_nfs nf
+            JOIN {schema}.tiny_orders o ON nf.cliente_cpf_cnpj = o.cliente_cpf_cnpj
+            JOIN {schema}.tiny_order_item oi ON o.id = oi.order_id
+            JOIN {schema}.tiny_products p ON oi.codigo = p.codigo
+            WHERE nf.tipo = 'S'
+              AND nf."createdAt" BETWEEN '{start_date}' AND '{end_date}'
+        """
+    elif status == 'Sem Venda':
+        query = f"""
+            SELECT codigo, nome, estoque, preco, categoria, preco_custo_medio
+            FROM {schema}.tiny_products
+            WHERE codigo NOT IN (
+                SELECT DISTINCT oi.codigo
+                FROM {schema}.tiny_nfs nf
+                JOIN {schema}.tiny_orders o ON nf.cliente_cpf_cnpj = o.cliente_cpf_cnpj
+                JOIN {schema}.tiny_order_item oi ON o.id = oi.order_id
+                WHERE nf.tipo = 'S'
+                  AND nf."createdAt" BETWEEN '{start_date}' AND '{end_date}'
+            )
+        """
+    else:
+        return []
+
+    df = execute_query(schema, query)
+    return df.to_dict(orient="records")
+
+def get_media_vendas_diarias(schema, data_inicio, data_fim):
+    query = f"""
+        SELECT oi.codigo, SUM(oi.quantidade::numeric) / 90 AS media_diaria
+        FROM {schema}.tiny_nfs nf
+        JOIN {schema}.tiny_orders o ON nf.cliente_cpf_cnpj = o.cliente_cpf_cnpj
+        JOIN {schema}.tiny_order_item oi ON o.id = oi.order_id
+        WHERE nf.tipo = 'S'
+        AND nf."createdAt" BETWEEN '{data_inicio}' AND '{data_fim}'
+        GROUP BY oi.codigo
+    """
+    df = execute_query(schema, query)
+    return {row['codigo']: row['media_diaria'] for _, row in df.iterrows()}
+
+def get_ultima_venda_por_produto(schema, data_inicio, data_fim):
+    query = f"""
+        SELECT oi.codigo, MAX(nf."createdAt") AS ultima_venda
+        FROM {schema}.tiny_nfs nf
+        JOIN {schema}.tiny_orders o ON nf.cliente_cpf_cnpj = o.cliente_cpf_cnpj
+        JOIN {schema}.tiny_order_item oi ON o.id = oi.order_id
+        WHERE nf.tipo = 'S'
+        AND nf."createdAt" BETWEEN '{data_inicio}' AND '{data_fim}'
+        GROUP BY oi.codigo
+    """
+    df = execute_query(schema, query)
+    return {row['codigo']: row['ultima_venda'] for _, row in df.iterrows()}
